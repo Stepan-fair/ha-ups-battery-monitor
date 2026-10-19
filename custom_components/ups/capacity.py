@@ -28,6 +28,8 @@ def consider_observation(state: EngineState,observation: CapacityObservation) ->
 
 def full_conditions(state,sample):
     c=state.config
+    if sample.charge_mosfet is False:return False
+    if c.source.charge_mosfet_entity_id and sample.charge_mosfet is None:return False
     # An omitted optional signal is different from a configured signal that
     # is currently unavailable. Only verified safe values may confirm full.
     for key,expected in (("charge_blocked",False),("battery_fault",False),("grid_failed",False),("full_flag",True)):

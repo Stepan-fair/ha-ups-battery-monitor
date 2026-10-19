@@ -157,10 +157,11 @@ def advance(state: EngineState,reading: ValidatedSample) -> Update:
 
 def reconfigure(state: EngineState,config: BatteryConfig,*,now) -> Update:
     if config.battery_id!=state.config.battery_id:raise ValueError("battery_changed")
-    boundary=config.source!=state.config.source
+    from .prediction import electrical_signature
+    boundary=electrical_signature(config.source)!=electrical_signature(state.config.source)
     s=replace(state,config=config,full_since_mono=None,full_latched=False,candidate_mode=None,candidate_started_at=None,candidate_started_mono=None,candidate_session=None,candidate_previous_session=None)
     if boundary:
-        s=replace(s,last_tick_monotonic_s=None,anchor_source_changed=True,anchor_has_gap=True,has_gap=True,last_verified_discharge_a=None,last_verified_discharge_at=None,smoothed_discharge_a=None,meter_checked_at=None)
+        s=replace(s,last_tick_monotonic_s=None,anchor_source_changed=True,anchor_has_gap=True,has_gap=True,last_verified_discharge_a=None,last_verified_discharge_at=None,smoothed_discharge_a=None,meter_checked_at=None,working_capacity=None,health_capacity=None,remaining_charge_ah=None,last_anchor=None,capacity_candidate=None,capacity_conflict=False,post_cutoff_charge_ah=None,usable_empty=False,prediction_points=())
     changed=config.ups_profile!=state.config.ups_profile or config.cutoff_v!=state.config.cutoff_v
     chemistry_changed=config.chemistry!=state.config.chemistry
     if changed or chemistry_changed:

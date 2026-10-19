@@ -30,6 +30,8 @@ def validate_profile(data: dict) -> BatteryConfig:
         v=getattr(s,key)
         if key.endswith('_entity_id') and v is not None and not re.fullmatch(r'[a-z_]+[.][a-z0-9_]+',v):raise ValueError("entity_id")
     if not 1<=s.auxiliary_interval_s<=86400:raise ValueError("auxiliary_interval")
+    if not 1<=s.bms_interval_s<=86400:raise ValueError('bms_interval')
+    if not 60<=c.load_max_age_s<=31536000 or not 3600<=c.calibration_max_age_s<=31536000:raise ValueError('evidence_age')
     if not s.source_id.strip():raise ValueError("source_id")
     last=-float('inf')
     for t,f in c.temperature_factors:

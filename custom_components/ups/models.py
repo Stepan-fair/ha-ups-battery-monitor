@@ -27,6 +27,15 @@ class SourceConfig:
     bms_soc_entity_id: str | None = None
     temperature_is_ambient: bool = True
     auxiliary_interval_s: float = 300.0
+    battery_temperature_entity_id: str | None = None
+    max_cell_voltage_entity_id: str | None = None
+    min_cell_index_entity_id: str | None = None
+    max_cell_index_entity_id: str | None = None
+    charge_mosfet_entity_id: str | None = None
+    discharge_mosfet_entity_id: str | None = None
+    protection_reason_entity_id: str | None = None
+    link_quality_entity_id: str | None = None
+    bms_interval_s: float = 30.0
 
 @dataclass(frozen=True)
 class BatteryConfig:
@@ -86,6 +95,15 @@ class Sample:
     cutoff_flag: bool | None = None
     charge_stage: str | None = None
     bms_soc_percent: float | None = None
+    ambient_temperature_c: float | None = None
+    temperature_is_ambient: bool | None = None
+    max_cell_voltage_v: float | None = None
+    min_cell_index: float | None = None
+    max_cell_index: float | None = None
+    charge_mosfet: bool | None = None
+    discharge_mosfet: bool | None = None
+    protection_reason: str | None = None
+    link_quality_percent: float | None = None
 
 @dataclass(frozen=True)
 class ValidatedSample:
@@ -179,6 +197,26 @@ class BatteryPassport:
     history_partial: bool = False
 
 @dataclass(frozen=True)
+class PredictionPoint:
+    session_id: str
+    utc: datetime
+    predicted_s: float
+    signature: str
+    load_a: float
+    temperature_c: float | None
+
+@dataclass(frozen=True)
+class PredictionError:
+    session_id: str
+    utc: datetime
+    ended_at: datetime
+    predicted_s: float
+    actual_s: float
+    signature: str
+    load_a: float
+    temperature_c: float | None
+
+@dataclass(frozen=True)
 class BatteryArchive:
     config: BatteryConfig
     retired_at: datetime
@@ -251,6 +289,8 @@ class EngineState:
     termination_status: str = "unknown"
     termination_at: datetime | None = None
     meter_checked_at: datetime | None = None
+    prediction_points: tuple[PredictionPoint, ...] = ()
+    prediction_errors: tuple[PredictionError, ...] = ()
 
 @dataclass(frozen=True)
 class Update:

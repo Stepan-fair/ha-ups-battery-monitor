@@ -45,13 +45,14 @@ def forecast(state: EngineState,sample: Sample,*,now) -> Forecast:
             ft=_factor(c.temperature_factors,sample.temperature_c)/_factor(c.temperature_factors,ref_t)
         elif abs(sample.temperature_c-ref_t)>5:issues.append("temperature_uncompensated")
     else:issues.append("temperature_unknown")
-    if c.source.temperature_is_ambient:issues.append("ambient_temperature")
+    if sample.temperature_is_ambient is True or (sample.temperature_is_ambient is None and c.source.temperature_is_ambient):issues.append("ambient_temperature")
     if current is not None and current>c.mode_exit_a and c.chemistry!="lifepo4":fi=(ref_i/current)**(c.peukert_k-1)
     remaining=capacity*usable*ft*fi
     if state.post_cutoff_charge_ah is not None:
         remaining=min(remaining,max(0,state.post_cutoff_charge_ah-capacity*c.reserve))
     seconds=None;cutoff_seconds=None;empty_at=None;full=None
-    if valid and current is not None and current>c.mode_exit_a and not state.capacity_conflict and cutoff_compatible and c.cutoff_v is not None:
+    if sample.discharge_mosfet is False:issues.append('discharge_blocked')
+    if valid and sample.discharge_mosfet is not False and current is not None and current>c.mode_exit_a and not state.capacity_conflict and cutoff_compatible and c.cutoff_v is not None:
         seconds=remaining/current*3600
         cutoff_remaining=capacity*max(0,min(1,available/capacity))*ft*fi
         if state.post_cutoff_charge_ah is not None:cutoff_remaining=min(cutoff_remaining,state.post_cutoff_charge_ah)
@@ -65,7 +66,7 @@ def forecast(state: EngineState,sample: Sample,*,now) -> Forecast:
         empty_at=now if drain and valid else None
     if c.cutoff_v is None:issues.append("cutoff_unconfigured")
     if c.reserve:context+="_to_reserve"
-    if state.mode=="charging" and valid and sample.current_a>c.mode_exit_a and sample.charge_blocked is not True:
+    if state.mode=="charging" and valid and sample.current_a>c.mode_exit_a and sample.charge_blocked is not True and sample.charge_mosfet is not False:
         if sample.charge_stage=="constant_current":
             full=max(0,capacity-available)/(c.charge_efficiency*sample.current_a)*3600
             issues.append("charge_eta_preliminary")
