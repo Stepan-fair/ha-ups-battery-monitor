@@ -66,7 +66,7 @@ class UpsRuntime:
     def _snapshot(self,now,monotonic_s):
         c=self.state.config.source
         mapping={'current':c.current_entity_id,'voltage':c.voltage_entity_id}
-        for key in ['temperature','humidity','grid_failed','battery_fault','load_power','charge_blocked','full_flag','min_cell_voltage','cutoff_flag','charge_stage','bms_soc']:
+        for key in ['temperature','humidity','grid_failed','battery_fault','load_power','charge_blocked','full_flag','min_cell_voltage','cutoff_flag','charge_stage','bms_soc','battery_temperature','max_cell_voltage','min_cell_index','max_cell_index','charge_mosfet','discharge_mosfet','protection_reason','link_quality']:
             entity=getattr(c,key+'_entity_id')
             if entity:mapping[key]=entity
         readings={}
@@ -122,10 +122,10 @@ class UpsRuntime:
         from .sensor import snapshot_values,snapshot_attributes
         s=self.state
         f=forecast(s,s.last_sample,now=now) if s.last_sample else Forecast(None,None,None,None,None,None,None,s.issues+('no_initial_anchor',),'unknown')
-        self.values=snapshot_values(s,f)
+        self.values=snapshot_values(s,f,now=now)
         if self.restore_error:
             self.values={key:None for key in self.values}|{'battery_mode':'restore_error','data_quality':'restore_error'}
-        self.attributes=snapshot_attributes(s,f)
+        self.attributes=snapshot_attributes(s,f,now=now)
         if monotonic_s is not None:self._last_publish_mono=monotonic_s
         for listener in tuple(self._listeners):listener()
     async def async_stop(self):
@@ -178,6 +178,13 @@ class UpsRuntime:
         async with self._lock:
             self._check_battery(expected_battery_id)
             await self._apply_locked(reset_learning(self.state,now=dt_util.utcnow()).state)
+
+    async def async_verify_meter(self,*,expected_battery_id,zero_raw_a,reference_raw_a,reference_a,confirmed):
+        from .evidence import verify_meter
+        async with self._lock:
+            self._check_battery(expected_battery_id)
+            result=verify_meter(self.state,zero_raw_a=zero_raw_a,reference_raw_a=reference_raw_a,reference_a=reference_a,confirmed=confirmed,now=dt_util.utcnow())
+            await self._apply_locked(result.state)
 
     async def _publish_events_locked(self,events):
         from .activity import reserve_activity

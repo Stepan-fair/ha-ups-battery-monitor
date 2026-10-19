@@ -32,7 +32,7 @@ def form_schema(config):
         schema={}
         for key,value in fields.items():
             if key.endswith('_entity_id'):
-                domain='binary_sensor' if key in ('grid_failed_entity_id','battery_fault_entity_id','charge_blocked_entity_id','full_flag_entity_id','cutoff_flag_entity_id') else 'sensor'
+                domain='binary_sensor' if key in ('grid_failed_entity_id','battery_fault_entity_id','charge_blocked_entity_id','full_flag_entity_id','cutoff_flag_entity_id','charge_mosfet_entity_id','discharge_mosfet_entity_id') else 'sensor'
                 validator=selector.EntitySelector(selector.EntitySelectorConfig(domain=domain))
             elif key=='chemistry':validator=choice(CHEMISTRIES)
             elif key=='ups_profile':validator=choice(UPS_PROFILES)
@@ -76,7 +76,38 @@ class UpsOptionsFlow(config_entries.OptionsFlow):
         self._base=self._runtime.state.config
         self._expected_battery_id=self._base.battery_id
         if self._runtime.restore_error:return self.async_abort(reason='restore_error')
-        return self.async_show_menu(step_id='init',menu_options=['profile','preset','new_battery','known_soc','reset_learning'])
+        return self.async_show_menu(step_id='init',menu_options=['profile','preset','meter','new_battery','known_soc','reset_learning'])
+
+    async def async_step_meter(self,user_input=None):
+        errors={}
+        if user_input is not None:
+            if not user_input.get('zero_physically_verified') or not user_input.get('range_physically_verified'):
+                errors={'base':'confirmation_required'}
+            else:
+                try:
+                    from .evidence import verify_meter
+                    points={key:float(user_input[key]) for key in ('zero_raw_a','reference_raw_a','reference_a')}
+                    proposed=verify_meter(self._runtime.state,**points,confirmed=True,now=dt_util.utcnow()).state
+                    self._meter_points=points;self._meter_source=self._runtime.state.config.source
+                    self._meter_proposed=proposed.config.source
+                    return await self.async_step_meter_confirm()
+                except (ValueError,TypeError,KeyError):errors={'base':'invalid_profile'}
+        schema=vol.Schema({vol.Required('zero_raw_a'):vol.Coerce(float),vol.Required('reference_raw_a'):vol.Coerce(float),vol.Required('reference_a'):vol.Coerce(float),vol.Required('zero_physically_verified',default=False):bool,vol.Required('range_physically_verified',default=False):bool})
+        return self.async_show_form(step_id='meter',data_schema=schema,errors=errors)
+
+    async def async_step_meter_confirm(self,user_input=None):
+        errors={}
+        if user_input is not None:
+            if not user_input.get('confirm'):errors={'base':'confirmation_required'}
+            else:
+                try:
+                    if self._runtime.state.config.source!=self._meter_source:raise ValueError('source_changed')
+                    await self._runtime.async_verify_meter(expected_battery_id=self._expected_battery_id,**self._meter_points,confirmed=True)
+                    return self.async_create_entry(title='',data={})
+                except CheckpointWriteError:errors={'base':'storage_error'}
+                except ValueError:errors={'base':'battery_changed'}
+        source=self._meter_proposed
+        return self.async_show_form(step_id='meter_confirm',data_schema=vol.Schema({vol.Required('confirm',default=False):bool}),errors=errors,description_placeholders={'sign':str(source.sign),'scale':f'{source.scale:.6g}','offset':f'{source.offset_a:.6g}'})
     async def async_step_preset(self,user_input=None):
         if user_input is not None:
             base=make_profile(user_input['chemistry'],user_input['ups_profile'],battery_id=self._expected_battery_id,nominal_ah=float(user_input['nominal_ah']))

@@ -45,12 +45,14 @@ def track_predictions(old,state,sample):
 
 def validation_summary(state,*,now):
     eligible={}
-    current=state.smoothed_discharge_a if state.mode=='discharging' else state.last_verified_discharge_a
+    from .forecast import load_context
+    current,_,_=load_context(state,state.last_sample,now=now)
     temp=state.last_sample.temperature_c if state.last_sample else None
     for error in state.prediction_errors:
+        if current is None or current<=state.config.mode_exit_a:continue
         if error.signature!=signature(state.config) or not 0<=(now-error.ended_at).total_seconds()<=90*86400:continue
         if error.actual_s<60 or error.predicted_s<=0:continue
-        if current and abs(error.load_a/current-1)>.2:continue
+        if abs(error.load_a/current-1)>.2:continue
         if temp is None or error.temperature_c is None or abs(temp-error.temperature_c)>5:continue
         # Multiple checkpoints in one discharge are correlated: one early point
         # represents one independent outcome, never several training samples.
@@ -80,7 +82,9 @@ def assessment(state,forecast,*,now):
         if sample.battery_fault:reasons.append('battery_fault')
         if sample.charge_blocked or sample.charge_mosfet is False:reasons.append('charge_blocked')
         if sample.discharge_mosfet is False:reasons.append('discharge_blocked')
-        if sample.protection_reason not in (None,'none','normal','ok','0',''):reasons.append('bms_protection')
+        # Text/code vocabularies differ by BMS. A separate explicit fault
+        # signal establishes protection; opaque diagnostic text does not.
+        if sample.battery_fault and sample.protection_reason:reasons.append('bms_protection')
     severe=any(r in reasons for r in ('range','stale','invalid','storage_error','restore_error','capacity_conflict','battery_fault','discharge_blocked'))
     status='unavailable' if forecast.time_remaining_s is None or severe else 'preliminary' if any(r in reasons for r in ('no_initial_anchor','nominal_estimate','manual_estimate','calibration_due','meter_unverified','data_gap','forecast_unvalidated','temperature_uncompensated','temperature_unknown','ambient_temperature')) else 'validated'
     lower=forecast.time_to_cutoff_s*validation['lower_factor'] if forecast.time_to_cutoff_s is not None and validation['lower_factor'] is not None and status!='unavailable' else None

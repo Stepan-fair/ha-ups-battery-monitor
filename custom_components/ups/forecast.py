@@ -9,6 +9,23 @@ def _factor(table,temp):
         if t0<=temp<=t1:return f0+(f1-f0)*(temp-t0)/(t1-t0)
     return 1.0
 
+
+def load_context(state,sample,*,now):
+    """The same effective, fresh load is used by forecasts and their validation."""
+    c=state.config
+    if sample is None or abs((now-sample.utc).total_seconds())>3*c.source.expected_interval_s:
+        return None,'unknown_load',False
+    if state.mode=='discharging' and sample.current_a < -c.mode_exit_a:
+        return state.smoothed_discharge_a,'discharging',False
+    if c.load_is_complete and sample.load_power_w is not None and sample.voltage_v>0:
+        return sample.load_power_w/(sample.voltage_v*c.load_efficiency),'complete_load',False
+    if state.last_verified_discharge_a is not None:
+        age=(now-state.last_verified_discharge_at).total_seconds() if state.last_verified_discharge_at else None
+        if age is not None and 0<=age<=c.load_max_age_s:
+            return state.last_verified_discharge_a,'last_discharge_load',False
+        return None,'unknown_load',True
+    return None,'unknown_load',False
+
 def forecast(state: EngineState,sample: Sample,*,now) -> Forecast:
     c=state.config;estimate=state.working_capacity;capacity=estimate.ah if estimate else c.nominal_ah
     issues=list(state.issues)
@@ -26,17 +43,9 @@ def forecast(state: EngineState,sample: Sample,*,now) -> Forecast:
     cutoff_compatible=estimate is None or (c.cutoff_v is not None and abs(estimate.cutoff_v-c.cutoff_v)<=.05)
     if not cutoff_compatible:issues.append("cutoff_changed")
     valid=not any(i in issues for i in ("range","invalid","stale","future","unit","voltage_range","storage_error","restore_error")) and abs((now-sample.utc).total_seconds())<=3*c.source.expected_interval_s
-    drain=state.mode=="discharging" and sample.current_a< -c.mode_exit_a
-    context="discharging" if drain else "unknown_load"
-    current=state.smoothed_discharge_a if drain else None
-    if not drain:
-        if c.load_is_complete and sample.load_power_w is not None and sample.voltage_v>0:
-            current=sample.load_power_w/(sample.voltage_v*c.load_efficiency);context="complete_load"
-        elif state.last_verified_discharge_a is not None:
-            age=(now-state.last_verified_discharge_at).total_seconds() if state.last_verified_discharge_at else None
-            if age is not None and 0<=age<=c.load_max_age_s:
-                current=state.last_verified_discharge_a;context="last_discharge_load"
-            else:issues.append('load_expired')
+    current,context,load_expired=load_context(state,sample,now=now)
+    drain=context=='discharging'
+    if load_expired:issues.append('load_expired')
     ref_t=estimate.reference_temperature_c if estimate else 25
     ref_i=estimate.reference_current_a if estimate else capacity/20
     ft=fi=1.0

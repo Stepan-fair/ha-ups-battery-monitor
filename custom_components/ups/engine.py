@@ -152,7 +152,7 @@ def advance(state: EngineState,reading: ValidatedSample) -> Update:
         events.append(ev)
     s=track_evidence(old,s,sample,iv)
     s=replace(s,pending_events=s.pending_events+tuple(events))
-    return Update(s,tuple(events),bool(events) or old.mode!=s.mode or old.issues!=s.issues)
+    return Update(s,tuple(events),bool(events) or old.mode!=s.mode or old.issues!=s.issues or old.last_anchor!=s.last_anchor or old.working_capacity!=s.working_capacity)
 
 
 def reconfigure(state: EngineState,config: BatteryConfig,*,now) -> Update:

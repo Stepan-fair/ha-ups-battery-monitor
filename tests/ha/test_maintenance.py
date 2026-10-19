@@ -53,7 +53,9 @@ async def test_ups_change_keeps_health(hass,freezer,runtime):
     runtime.state=replace(runtime.state,working_capacity=cap,health_capacity=cap)
     await runtime.async_apply_config(replace(runtime.state.config,ups_profile="meanwell",cutoff_v=11.0))
     assert runtime.state.health_capacity==cap
-    assert runtime.state.working_capacity==cap
+    # A different cutoff changes the usable range, while the historical aging
+    # observation remains available with its original reference conditions.
+    assert runtime.state.working_capacity is None
 
 async def test_missing_checkpoint_after_initialization_does_not_use_seed(hass,freezer,runtime):
     entry=runtime.entry

@@ -29,7 +29,9 @@ def normalize(raw: RawSnapshot, config: SourceConfig) -> ValidatedSample:
     if amps is not None:
         calibrated=config.sign*(amps*config.scale-config.offset_a)
         def outside(i): return i<=config.min_current_a*.98 or i>=config.max_current_a*.98
-        if outside(amps) or outside(calibrated): issues.append("range")
+        # Hardware clipping is determined before software calibration. The
+        # reference correction changes units, never the ADC input range.
+        if outside(amps): issues.append("range")
         amps=calibrated
     if volts is not None and not 0<volts<=1000: issues.append("voltage_range")
     required_ok=not issues

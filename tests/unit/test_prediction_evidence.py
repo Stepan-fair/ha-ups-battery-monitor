@@ -69,7 +69,7 @@ def test_primary_calibration_change_invalidates_learned_capacity():
 def test_empirical_envelope_requires_three_distinct_clean_outcomes():
     from custom_components.ups.models import PredictionError
     from custom_components.ups.prediction import validation_summary, signature
-    s=replace(EngineState(profile()),last_sample=sample(20000,-2,temperature_c=25),smoothed_discharge_a=2)
+    s=replace(EngineState(profile()),mode='discharging',last_sample=sample(20000,-2,temperature_c=25),smoothed_discharge_a=2)
     key=signature(s.config)
     def error(session,predicted,actual):
         return PredictionError(session,utc(100),utc(100+actual),predicted,actual,key,2,25)
@@ -136,3 +136,29 @@ def test_replay_uses_measured_intervals_and_never_bridges_gaps(tmp_path):
     assert s.discharge_ah_total==pytest.approx(2*5/3600)
     assert s.passport.discharge_ah==pytest.approx(2*5/3600)
     assert s.has_gap and not s.prediction_errors
+
+
+def test_calibrated_current_does_not_expand_raw_adc_range_or_clip_good_reference():
+    from custom_components.ups.evidence import verify_meter
+    s=verify_meter(EngineState(profile()),zero_raw_a=.02,reference_raw_a=.52,reference_a=1,confirmed=True,now=utc()).state
+    c=replace(s.config.source,min_current_a=-.8192,max_current_a=.8192)
+    v=normalize(raw(5,amps='.52'),c)
+    assert v.sample is not None and v.sample.current_a==pytest.approx(1)
+    assert normalize(raw(5,amps='.8185'),c).sample is None
+
+
+def test_accepted_capacity_is_published_as_an_activity_event():
+    from custom_components.ups.engine import set_known_soc
+    p=profile(chemistry='lifepo4',nominal_ah=2,peukert_k=1,mode_hold_s=0)
+    s=set_known_soc(EngineState(p),Anchor(utc(),1,'independent',True)).state
+    for t in range(0,3601,5):
+        s=advance(s,reading(t,-2,10.5 if t>=3595 else 12.8,temperature_c=25)).state
+    assert len(s.capacity_history)==1
+    assert any(e.kind=='capacity_updated' for e in s.pending_events)
+
+
+def test_opaque_bms_text_does_not_invent_a_protection_fault():
+    from custom_components.ups.prediction import assessment
+    s=replace(EngineState(profile()),last_sample=sample(0,protection_reason='Норма'))
+    f=forecast(s,s.last_sample,now=utc())
+    assert 'bms_protection' not in assessment(s,f,now=utc())['reasons']

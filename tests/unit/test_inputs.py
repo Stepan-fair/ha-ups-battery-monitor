@@ -21,9 +21,12 @@ def test_rejects_stale_nonfinite_and_saturation(r,issue):
     assert result.sample is None
     assert issue in result.issues
 
-def test_physical_range_before_and_after_calibration():
-    for s in [source(max_current_a=.8192),source(max_current_a=.8192,scale=.1),source(max_current_a=1,scale=2)]:
+def test_physical_adc_range_cannot_be_hidden_by_software_calibration():
+    for s in [source(max_current_a=.8192),source(max_current_a=.8192,scale=.1),source(max_current_a=.8192,scale=2)]:
         assert "range" in normalize(raw(10,amps="0.8185"),s).issues
+    # A larger corrected reference is valid while the actual raw ADC input
+    # remains inside its independently configured hardware range.
+    assert normalize(raw(10,amps='0.8185'),source(max_current_a=1,scale=2)).sample.current_a==pytest.approx(1.637)
 
 def test_optional_failure_preserves_accounting():
     result=normalize(raw(10,readings={"temperature":RawReading("nan","°C",utc(10))}),source())

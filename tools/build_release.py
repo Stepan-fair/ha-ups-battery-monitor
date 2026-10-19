@@ -2,7 +2,7 @@
 from pathlib import Path
 import argparse,hashlib,json,zipfile
 
-ROOT_PY={'__init__.py','const.py','models.py','profiles.py','inputs.py','accounting.py','sessions.py','engine.py','capacity.py','forecast.py','persistence.py','runtime.py','sensor.py','binary_sensor.py','config_flow.py','diagnostics.py','activity.py'}
+ROOT_PY={'__init__.py','const.py','models.py','profiles.py','inputs.py','accounting.py','sessions.py','engine.py','capacity.py','forecast.py','persistence.py','runtime.py','sensor.py','binary_sensor.py','config_flow.py','diagnostics.py','activity.py','migration.py','evidence.py','prediction.py'}
 
 def allowed_component_file(relative):
     p=Path(relative)

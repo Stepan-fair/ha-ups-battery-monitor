@@ -6,12 +6,39 @@ from .persistence import _encode
 MODES=['unknown','idle','charging','discharging','restore_error']
 QUALITIES=['restore_error','storage_error','limited_meter','unavailable','no_initial_anchor','capacity_conflict','data_gap','nominal','manual_estimate','observed']
 LABELS={'current':'Ток АКБ','voltage':'Напряжение АКБ','temperature':'Температура','humidity':'Влажность','bms_soc':'Заряд BMS (отдельный)','soc':'Заряд АКБ','usable_soc':'Доступный запас','remaining_ah':'Осталось А·ч','remaining_wh':'Осталось энергии','time_remaining':'Автономность','expected_empty_at':'Ожидаемое окончание','time_to_full':'До полного заряда','capacity_ah':'Рабочая ёмкость','health':'Сохранение ёмкости','battery_mode':'Режим АКБ','charge_ah_total':'Принято А·ч','discharge_ah_total':'Отдано А·ч','charge_wh_total':'Принято энергии','discharge_wh_total':'Отдано энергии','charge_started_at':'Начало заряда','discharge_started_at':'Начало разряда','last_charge_ended_at':'Окончание последнего заряда','last_discharge_ended_at':'Окончание последнего разряда','charge_duration':'Длительность заряда','discharge_duration':'Длительность разряда','last_charge_duration':'Последний заряд','last_discharge_duration':'Последний разряд','data_quality':'Достоверность','last_sample_at':'Последнее измерение'}
+LABELS.update({'forecast_status':'Статус прогноза','calibration_status':'Калибровка заряда',
+ 'time_to_cutoff':'До рабочего отключения','time_cutoff_lower':'Нижняя оценка до отключения',
+ 'time_cutoff_upper':'Верхняя оценка до отключения','prediction_error':'Средняя ошибка прогноза',
+ 'verified_cycles':'Проверенные разряды','last_calibration_at':'Последняя опорная точка',
+ 'last_full_at':'Последний полный заряд','meter_checked_at':'Проверка измерителя',
+ 'last_load_at':'Последнее измерение нагрузки от АКБ','load_age':'Возраст измерения нагрузки',
+ 'calibration_age':'Время после опорной точки','equivalent_cycles':'Эквивалентные циклы АКБ',
+ 'battery_charge_ah':'Принято этой АКБ','battery_discharge_ah':'Отдано этой АКБ',
+ 'battery_discharge_wh':'Отдано энергии этой АКБ','min_voltage':'Минимальное напряжение АКБ',
+ 'max_charge_current':'Максимальный ток заряда','max_discharge_current':'Максимальный ток разряда',
+ 'full_count':'Подтверждённые полные заряды','termination_status':'Последнее завершение разряда',
+ 'cell_min':'Минимальное напряжение ячейки','cell_max':'Максимальное напряжение ячейки',
+ 'cell_delta':'Разбаланс ячеек','ambient_temperature':'Температура помещения',
+ 'bms_link_quality':'Качество связи BMS','bms_soc_difference':'Расхождение с зарядом BMS',
+ 'bms_protection':'Причина защиты BMS','charge_status':'Состояние зарядки'})
+ENUMS={'forecast_status':['no_estimate','preliminary','validated'],
+ 'calibration_status':['no_anchor','manual','due','verified'],
+ 'termination_status':['unknown','unconfirmed_stop','confirmed_cutoff','grid_restored','partial','interrupted'],
+ 'charge_status':['blocked','constant_current','finishing','idle','unknown']}
+VOLTAGE_KEYS={'cell_min','cell_max','cell_delta','min_voltage'}
+DURATION_KEYS={'time_to_cutoff','time_cutoff_lower','time_cutoff_upper','prediction_error','load_age','calibration_age'}
 
 def sensor_descriptions():
     result=[]
     for key,name in LABELS.items():
         kw={'key':key,'name':name}
-        if key in ('current','voltage','temperature','humidity'):
+        if key in ENUMS:kw.update(device_class=DC.ENUM,options=ENUMS[key],translation_key=key)
+        elif key in VOLTAGE_KEYS:kw.update(native_unit_of_measurement='V',device_class=DC.VOLTAGE,state_class=SC.MEASUREMENT)
+        elif key in DURATION_KEYS:kw.update(native_unit_of_measurement='s',device_class=DC.DURATION)
+        elif key in ('max_charge_current','max_discharge_current'):kw.update(native_unit_of_measurement='A',device_class=DC.CURRENT,state_class=SC.MEASUREMENT)
+        elif key=='ambient_temperature':kw.update(native_unit_of_measurement='°C',device_class=DC.TEMPERATURE,state_class=SC.MEASUREMENT)
+        elif key in ('bms_link_quality','bms_soc_difference'):kw.update(native_unit_of_measurement='%',state_class=SC.MEASUREMENT)
+        elif key in ('current','voltage','temperature','humidity'):
             units={'current':'A','voltage':'V','temperature':'°C','humidity':'%'}
             classes={'current':DC.CURRENT,'voltage':DC.VOLTAGE,'temperature':DC.TEMPERATURE,'humidity':DC.HUMIDITY}
             kw.update(native_unit_of_measurement=units[key],device_class=classes[key],state_class=SC.MEASUREMENT)
@@ -25,7 +52,7 @@ def sensor_descriptions():
         result.append(SensorEntityDescription(**kw))
     return tuple(result)
 
-def snapshot_values(s,f):
+def snapshot_values(s,f,*,now=None):
     cap=s.working_capacity.ah if s.working_capacity else s.config.nominal_ah
     health=s.health_capacity.ah/s.config.nominal_ah*100 if s.health_capacity else None
     issues=f.quality
@@ -43,13 +70,40 @@ def snapshot_values(s,f):
         values['last_'+kind+'_ended_at']=last.ended_at if last else None
         values[kind+'_duration']=active.measured_s if active else None
         values['last_'+kind+'_duration']=last.measured_s if last else None
+    from .prediction import assessment
+    from datetime import datetime,timezone
+    now=now or (s.last_sample.utc if s.last_sample else datetime.now(timezone.utc))
+    a=assessment(s,f,now=now);p=s.passport
+    calibration='no_anchor' if s.last_anchor is None else 'manual' if not s.last_anchor.independently_verified else 'due' if 'calibration_due' in a['reasons'] else 'verified'
+    charge='blocked' if sample and (sample.charge_blocked or sample.charge_mosfet is False) else sample.charge_stage if sample and sample.charge_stage else 'unknown'
+    values.update({'forecast_status':'no_estimate' if a['status']=='unavailable' else a['status'],
+      'calibration_status':calibration,'time_to_cutoff':f.time_to_cutoff_s,
+      'time_cutoff_lower':a['cutoff_lower_s'],'time_cutoff_upper':a['cutoff_upper_s'],
+      'prediction_error':a['validation']['mean_absolute_error_s'],'verified_cycles':a['validation']['cycles'],
+      'last_calibration_at':a['calibrated_at'],'calibration_age':a['calibration_age_s'],
+      'last_full_at':p.last_full_at,'meter_checked_at':s.meter_checked_at,
+      'last_load_at':s.last_verified_discharge_at,
+      'load_age':max(0,(now-s.last_verified_discharge_at).total_seconds()) if s.last_verified_discharge_at else None,
+      'equivalent_cycles':p.discharge_ah/s.config.nominal_ah,
+      'battery_charge_ah':p.charge_ah,'battery_discharge_ah':p.discharge_ah,
+      'battery_discharge_wh':p.discharge_wh,'min_voltage':p.min_voltage_v,
+      'max_charge_current':p.max_charge_a,'max_discharge_current':p.max_discharge_a,
+      'full_count':p.full_count,'termination_status':s.termination_status,
+      'cell_min':sample.min_cell_voltage_v if sample else None,
+      'cell_max':sample.max_cell_voltage_v if sample else None,
+      'cell_delta':sample.max_cell_voltage_v-sample.min_cell_voltage_v if sample and sample.max_cell_voltage_v is not None and sample.min_cell_voltage_v is not None else None,
+      'ambient_temperature':sample.ambient_temperature_c if sample else None,
+      'bms_link_quality':sample.link_quality_percent if sample else None,
+      'bms_soc_difference':a['bms_difference_percent'] if sample else None,
+      'bms_protection':sample.protection_reason[:200] if sample and sample.protection_reason is not None else None,
+      'charge_status':charge})
     for key,v in values.items():
         if isinstance(v,(int,float)):
-            precision=3 if '_ah' in key or key in ('current','voltage') else 2 if '_wh' in key else 1 if key in ('soc','usable_soc','health','temperature','humidity','bms_soc') else 0
+            precision=4 if key=='equivalent_cycles' else 3 if '_ah' in key or key in ('current','voltage','max_charge_current','max_discharge_current') or key in VOLTAGE_KEYS else 2 if '_wh' in key else 1 if key in ('soc','usable_soc','health','temperature','ambient_temperature','humidity','bms_soc','bms_soc_difference','bms_link_quality') else 0
             values[key]=round(v,precision)
     return values
 
-def snapshot_attributes(s,f):
+def snapshot_attributes(s,f,*,now=None):
     cap=s.working_capacity
     attrs={'data_quality':{'issues':list(f.quality),'generation':s.generation,'battery_id':s.config.battery_id,'source':s.config.source.source_id,'has_gap':s.has_gap},'capacity_ah':{'origin':'observed' if cap else 'nominal','conditions':_encode(cap),'battery_name':s.config.name},'health':{'raw_percent':s.health_capacity.ah/s.config.nominal_ah*100 if s.health_capacity else None,'conditions':_encode(s.health_capacity)},'time_remaining':{'context':f.context,'reserve_percent':s.config.reserve*100},'soc':{'last_anchor':_encode(s.last_anchor)},'battery_mode':{'active_session':_encode(s.active_session),'battery_name':s.config.name}}
     attrs['temperature']={'ambient':s.config.source.temperature_is_ambient}
@@ -58,6 +112,24 @@ def snapshot_attributes(s,f):
         last=getattr(s,'last_'+kind)
         attrs['last_'+kind+'_duration']={'session':_encode(last)}
         attrs[kind+'_duration']={'session':_encode(s.active_session) if s.active_session and s.active_session.kind==('charging' if kind=='charge' else 'discharging') else None}
+    from .prediction import assessment
+    from datetime import datetime,timezone
+    now=now or (s.last_sample.utc if s.last_sample else datetime.now(timezone.utc))
+    a=assessment(s,f,now=now)
+    attrs['forecast_status']=_encode(a)
+    attrs['data_quality']['meter_range_a']=[s.config.source.min_current_a,s.config.source.max_current_a]
+    attrs['prediction_error']={**_encode(a['validation']),'target':'observed_cutoff','scope':'comparable_load_temperature_and_profile','independent_sessions':True}
+    attrs['capacity_ah']['history']=_encode(s.capacity_history[-8:])
+    attrs['capacity_ah']['history_count']=len(s.capacity_history)
+    attrs['equivalent_cycles']={'battery_id':s.config.battery_id,'passport':_encode(s.passport),'definition':'discharged_Ah / configured_nominal_Ah','since':'monitoring_started','archives':len(s.archives)}
+    attrs['cell_min']={'cell_index':s.last_sample.min_cell_index if s.last_sample else None}
+    attrs['cell_max']={'cell_index':s.last_sample.max_cell_index if s.last_sample else None}
+    attrs['termination_status']={'occurred_at':_encode(s.termination_at),'shutdown_proves_cutoff':False}
+    attrs['time_to_cutoff']={'target':'working_cutoff','reserve_percent':0}
+    for key in ('time_cutoff_lower','time_cutoff_upper'):
+        attrs[key]={'target':'working_cutoff','method':'observed_error_envelope','probability':None,'verified_cycles':a['validation']['cycles']}
+    attrs['last_load_at']={'max_age_s':s.config.load_max_age_s}
+    if s.last_sample:attrs['temperature']['ambient']=s.last_sample.temperature_is_ambient if s.last_sample.temperature_is_ambient is not None else s.config.source.temperature_is_ambient
     return attrs
 
 async def async_setup_entry(hass,entry,async_add_entities):

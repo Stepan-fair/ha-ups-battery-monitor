@@ -3,6 +3,10 @@ from dataclasses import replace
 
 def track_evidence(old, state, sample, interval):
     p=state.passport
+    if state.last_discharge is not None and state.last_discharge!=old.last_discharge:
+        session=state.last_discharge
+        status='confirmed_cutoff' if session.end_reason=='confirmed_cutoff' else 'interrupted' if session.gap_s or session.quality else 'grid_restored' if session.end_reason=='grid_restored' else 'partial'
+        state=replace(state,termination_status=status,termination_at=session.ended_at)
     if sample is not None:
         p=replace(p,charge_ah=p.charge_ah+interval.charge_ah,
                   discharge_ah=p.discharge_ah+interval.discharge_ah,
@@ -17,6 +21,12 @@ def track_evidence(old, state, sample, interval):
     history=state.capacity_history
     if state.working_capacity is not None and state.working_capacity!=old.working_capacity:
         history=(history+(state.working_capacity,))[-64:]
+        from .models import DomainEvent
+        cap=state.working_capacity
+        ev=DomainEvent(f'{state.config.battery_id}/capacity/{cap.observed_at.isoformat()}',
+            'capacity_updated',cap.observed_at,state.config.battery_id,None,
+            f'Рабочая ёмкость уточнена: {cap.ah:.2f} А·ч при {cap.reference_temperature_c:.1f} °C, {cap.reference_current_a:.2f} А; отсечка {cap.cutoff_v:.2f} В.')
+        state=replace(state,pending_events=state.pending_events+(ev,))
     state=replace(state,passport=p,capacity_history=history)
     from .prediction import track_predictions
     return track_predictions(old,state,sample)
@@ -30,7 +40,7 @@ def verify_meter(state,*,zero_raw_a,reference_raw_a,reference_a,confirmed,now):
     values=(zero_raw_a,reference_raw_a,reference_a)
     if not confirmed or any(not math.isfinite(v) for v in values):raise ValueError('confirmation_required')
     source=state.config.source
-    if not source.min_current_a*.98<reference_raw_a<source.max_current_a*.98:raise ValueError('range')
+    if any(not source.min_current_a*.98<value<source.max_current_a*.98 for value in (zero_raw_a,reference_raw_a)):raise ValueError('range')
     delta=reference_raw_a-zero_raw_a
     if abs(delta)<.01 or abs(reference_a)<.05:raise ValueError('reference_too_small')
     ratio=reference_a/delta
