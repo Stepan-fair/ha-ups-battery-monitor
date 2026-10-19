@@ -22,7 +22,8 @@ _LOGGER=logging.getLogger(__name__)
 class UpsRuntime:
     def __init__(self,hass,entry):
         self.hass=hass;self.entry=entry
-        self.state=initial_state(_decode(BatteryConfig,dict(entry.data['seed'])))
+        from .migration import upgrade_config
+        self.state=initial_state(_decode(BatteryConfig,upgrade_config(dict(entry.data['seed']))))
         self.store=CheckpointStore(Path(hass.config.path('.storage','ups')),entry.entry_id)
         self.run_id=str(uuid4());self._lock=asyncio.Lock();self._tick_running=False
         self._stopping=False;self._unsubscribe=None;self._unsubscribe_stop=None;self._listeners=set()

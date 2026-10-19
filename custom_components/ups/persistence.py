@@ -78,11 +78,15 @@ def encode_state(state: EngineState,*,generation: int) -> dict:
 
 def decode_state(data: dict) -> EngineState:
     if not isinstance(data,dict):raise CheckpointError("envelope")
-    if data.get("version")!=SCHEMA_VERSION:raise UnsupportedVersion("unsupported_version")
+    if data.get("version") not in (1,SCHEMA_VERSION):raise UnsupportedVersion("unsupported_version")
     if set(data)!={"version","generation","state","checksum"}:raise CheckpointError("envelope fields")
     body={k:v for k,v in data.items() if k!="checksum"}
     if hashlib.sha256(_canonical(body)).hexdigest()!=data['checksum']:raise CheckpointError("checksum")
-    s=_decode(EngineState,data['state'])
+    payload=data['state']
+    if data['version']==1:
+        from .migration import upgrade_v1
+        payload=upgrade_v1(payload)
+    s=_decode(EngineState,payload)
     c=s.config;source=c.source
     if s.generation!=data['generation'] or s.generation<1:raise CheckpointError("generation")
     if not c.battery_id or not c.source.source_id or not 0<c.nominal_ah<=10000 or c.nominal_voltage<=0 or not 0<c.charge_efficiency<=1:raise CheckpointError("profile")

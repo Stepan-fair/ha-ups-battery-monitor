@@ -51,6 +51,8 @@ class BatteryConfig:
     load_is_complete: bool = False
     load_efficiency: float = 1.0
     temperature_factors: tuple[tuple[float, float], ...] = ()
+    load_max_age_s: float = 604800.0
+    calibration_max_age_s: float = 2592000.0
 
 @dataclass(frozen=True)
 class RawReading:
@@ -163,6 +165,20 @@ class DomainEvent:
     message: str
 
 @dataclass(frozen=True)
+class BatteryPassport:
+    charge_ah: float = 0.0
+    discharge_ah: float = 0.0
+    charge_wh: float = 0.0
+    discharge_wh: float = 0.0
+    min_voltage_v: float | None = None
+    max_charge_a: float = 0.0
+    max_discharge_a: float = 0.0
+    full_count: int = 0
+    last_full_at: datetime | None = None
+    monitoring_started_at: datetime | None = None
+    history_partial: bool = False
+
+@dataclass(frozen=True)
 class BatteryArchive:
     config: BatteryConfig
     retired_at: datetime
@@ -170,6 +186,8 @@ class BatteryArchive:
     health_capacity: CapacityEstimate | None
     last_charge: Session | None
     last_discharge: Session | None
+    passport: BatteryPassport = field(default_factory=BatteryPassport)
+    capacity_history: tuple[CapacityEstimate, ...] = ()
 
 @dataclass(frozen=True)
 class EngineState:
@@ -227,6 +245,12 @@ class EngineState:
     archives: tuple[BatteryArchive, ...] = ()
     last_reset_at: datetime | None = None
     restored: bool = False
+    passport: BatteryPassport = field(default_factory=BatteryPassport)
+    capacity_history: tuple[CapacityEstimate, ...] = ()
+    last_verified_discharge_at: datetime | None = None
+    termination_status: str = "unknown"
+    termination_at: datetime | None = None
+    meter_checked_at: datetime | None = None
 
 @dataclass(frozen=True)
 class Update:
@@ -245,3 +269,4 @@ class Forecast:
     time_to_full_s: float | None
     quality: tuple[str, ...]
     context: str
+    time_to_cutoff_s: float | None = None

@@ -33,7 +33,10 @@ def forecast(state: EngineState,sample: Sample,*,now) -> Forecast:
         if c.load_is_complete and sample.load_power_w is not None and sample.voltage_v>0:
             current=sample.load_power_w/(sample.voltage_v*c.load_efficiency);context="complete_load"
         elif state.last_verified_discharge_a is not None:
-            current=state.last_verified_discharge_a;context="last_discharge_load"
+            age=(now-state.last_verified_discharge_at).total_seconds() if state.last_verified_discharge_at else None
+            if age is not None and 0<=age<=c.load_max_age_s:
+                current=state.last_verified_discharge_a;context="last_discharge_load"
+            else:issues.append('load_expired')
     ref_t=estimate.reference_temperature_c if estimate else 25
     ref_i=estimate.reference_current_a if estimate else capacity/20
     ft=fi=1.0
@@ -47,14 +50,18 @@ def forecast(state: EngineState,sample: Sample,*,now) -> Forecast:
     remaining=capacity*usable*ft*fi
     if state.post_cutoff_charge_ah is not None:
         remaining=min(remaining,max(0,state.post_cutoff_charge_ah-capacity*c.reserve))
-    seconds=None;empty_at=None;full=None
+    seconds=None;cutoff_seconds=None;empty_at=None;full=None
     if valid and current is not None and current>c.mode_exit_a and not state.capacity_conflict and cutoff_compatible and c.cutoff_v is not None:
         seconds=remaining/current*3600
+        cutoff_remaining=capacity*max(0,min(1,available/capacity))*ft*fi
+        if state.post_cutoff_charge_ah is not None:cutoff_remaining=min(cutoff_remaining,state.post_cutoff_charge_ah)
+        cutoff_seconds=cutoff_remaining/current*3600
         if drain:empty_at=now+timedelta(seconds=seconds)
     if state.mode_observed_s<30:issues.append("preliminary")
     if state.usable_empty:
         usable=0;remaining=0
         seconds=0 if valid else None
+        cutoff_seconds=seconds
         empty_at=now if drain and valid else None
     if c.cutoff_v is None:issues.append("cutoff_unconfigured")
     if c.reserve:context+="_to_reserve"
@@ -65,4 +72,4 @@ def forecast(state: EngineState,sample: Sample,*,now) -> Forecast:
         elif sample.charge_stage=="finishing" and state.last_finishing_s is not None and state.finishing_started_at is not None and not state.anchor_has_gap:
             if sample.temperature_c is not None and state.last_finishing_temperature_c is not None and abs(sample.temperature_c-state.last_finishing_temperature_c)<=5 and state.last_finishing_current_a and abs(sample.current_a/state.last_finishing_current_a-1)<=.2:
                 full=max(0,state.last_finishing_s-state.finishing_measured_s)
-    return Forecast(soc*100,usable*100,remaining,remaining*c.nominal_voltage,seconds,empty_at,full,tuple(dict.fromkeys(issues)),context)
+    return Forecast(soc*100,usable*100,remaining,remaining*c.nominal_voltage,seconds,empty_at,full,tuple(dict.fromkeys(issues)),context,cutoff_seconds)

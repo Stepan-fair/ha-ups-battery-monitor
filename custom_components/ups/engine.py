@@ -6,6 +6,7 @@ from .models import *
 from .accounting import integrate
 from .capacity import consider_observation,evaluate_full_anchor,full_conditions
 from .sessions import start_session,add_interval,close_session,event
+from .evidence import track_evidence
 
 def _capacity(state):
     return state.working_capacity.ah if state.working_capacity else state.config.nominal_ah
@@ -134,7 +135,7 @@ def advance(state: EngineState,reading: ValidatedSample) -> Update:
                 # Without a newly accepted independent capacity experiment, only
                 # available reserve is known to be empty; retain the raw estimate.
                 s=replace(s,remaining_charge_ah=chemical_q,has_gap=previous_gap)
-        s=replace(s,usable_empty=True,post_cutoff_charge_ah=0.0)
+        s=replace(s,usable_empty=True,post_cutoff_charge_ah=0.0,termination_status='confirmed_cutoff',termination_at=sample.utc)
         if s.active_session and s.active_session.kind=="discharging":
             closed=close_session(s.active_session,sample.utc,"confirmed_cutoff",_soc(s))
             events.append(event(closed,"session_ended",sample.utc,"Подтверждённая отсечка: доступный запас исчерпан"))
@@ -143,10 +144,13 @@ def advance(state: EngineState,reading: ValidatedSample) -> Update:
         s=replace(s,finishing_started_at=s.finishing_started_at or sample.utc,finishing_measured_s=s.finishing_measured_s+iv.dt_s)
     elif not s.full_latched:s=replace(s,finishing_started_at=None,finishing_measured_s=0)
     if s.last_discharge and s.last_discharge is not state.last_discharge and not s.last_discharge.gap_s and s.last_discharge.measured_s>=30 and not s.anchor_has_saturation:
-        s=replace(s,last_verified_discharge_a=s.last_discharge.discharge_ah*3600/s.last_discharge.measured_s)
+        s=replace(s,last_verified_discharge_a=s.last_discharge.discharge_ah*3600/s.last_discharge.measured_s,last_verified_discharge_at=s.last_discharge.ended_at)
     if state.restored:
+        if state.active_session and state.active_session.kind=='discharging' and not state.usable_empty:
+            s=replace(s,termination_status='unconfirmed_stop',termination_at=prev.utc if prev else sample.utc)
         ev=DomainEvent(f"{c.battery_id}/recovery/{sample.run_id}","recovered",sample.utc,c.battery_id,s.active_session.session_id if s.active_session else None,f"Восстановление после запуска. Последнее известное измерение: {prev.utc.isoformat() if prev else 'нет'}. Пропуск {gap:.0f} с не учитывался.")
         events.append(ev)
+    s=track_evidence(old,s,sample,iv)
     s=replace(s,pending_events=s.pending_events+tuple(events))
     return Update(s,tuple(events),bool(events) or old.mode!=s.mode or old.issues!=s.issues)
 
@@ -156,9 +160,11 @@ def reconfigure(state: EngineState,config: BatteryConfig,*,now) -> Update:
     boundary=config.source!=state.config.source
     s=replace(state,config=config,full_since_mono=None,full_latched=False,candidate_mode=None,candidate_started_at=None,candidate_started_mono=None,candidate_session=None,candidate_previous_session=None)
     if boundary:
-        s=replace(s,last_tick_monotonic_s=None,anchor_source_changed=True,anchor_has_gap=True,has_gap=True,last_verified_discharge_a=None,smoothed_discharge_a=None)
-    if config.ups_profile!=state.config.ups_profile or config.cutoff_v!=state.config.cutoff_v:
-        s=replace(s,anchor_source_changed=True,last_verified_discharge_a=None,usable_empty=False)
+        s=replace(s,last_tick_monotonic_s=None,anchor_source_changed=True,anchor_has_gap=True,has_gap=True,last_verified_discharge_a=None,last_verified_discharge_at=None,smoothed_discharge_a=None,meter_checked_at=None)
+    changed=config.ups_profile!=state.config.ups_profile or config.cutoff_v!=state.config.cutoff_v
+    chemistry_changed=config.chemistry!=state.config.chemistry
+    if changed or chemistry_changed:
+        s=replace(s,anchor_source_changed=True,last_verified_discharge_a=None,last_verified_discharge_at=None,usable_empty=False,post_cutoff_charge_ah=None,working_capacity=None,capacity_candidate=None,capacity_conflict=False,last_anchor=None,remaining_charge_ah=None,health_capacity=None if chemistry_changed else s.health_capacity)
     return Update(s,(),True)
 
 def new_battery(state: EngineState,*,battery_id: str,now) -> Update:
@@ -169,7 +175,7 @@ def new_battery(state: EngineState,*,battery_id: str,now) -> Update:
         closed=close_session(old.active_session,now,"battery_replaced",_soc(old))
         old=replace(old,**{'last_charge' if closed.kind=='charging' else 'last_discharge':closed})
         events.append(event(closed,'session_ended',now,'Сессия завершена: замена АКБ'))
-    archive=BatteryArchive(old.config,now,old.working_capacity,old.health_capacity,old.last_charge,old.last_discharge)
+    archive=BatteryArchive(old.config,now,old.working_capacity,old.health_capacity,old.last_charge,old.last_discharge,old.passport,old.capacity_history)
     ev=DomainEvent(f'{battery_id}/installed','battery_replaced',now,battery_id,None,'Установлена новая батарея. Начальная ёмкость и заряд ещё не подтверждены.')
     events.append(ev)
     s=EngineState(replace(old.config,battery_id=battery_id),generation=old.generation,charge_ah_total=old.charge_ah_total,discharge_ah_total=old.discharge_ah_total,charge_wh_total=old.charge_wh_total,discharge_wh_total=old.discharge_wh_total,archives=old.archives+(archive,),pending_events=old.pending_events+tuple(events),activity_reserved_ids=old.activity_reserved_ids)
