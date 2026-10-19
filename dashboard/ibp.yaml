@@ -5,15 +5,24 @@ sections:
       - type: heading
         heading: ИБП · запас автономности
         icon: mdi:battery-heart
-      - type: gauge
-        entity: sensor.ups_soc
-        name: Расчётный заряд АКБ
-        min: 0
-        max: 100
-        severity:
-          red: 0
-          yellow: 25
-          green: 60
+      - type: conditional
+        conditions:
+          - condition: state
+            entity: sensor.ups_soc
+            state_not: unavailable
+          - condition: state
+            entity: sensor.ups_soc
+            state_not: unknown
+        card:
+          type: gauge
+          entity: sensor.ups_soc
+          name: Расчётный заряд АКБ
+          min: 0
+          max: 100
+          severity:
+            red: 0
+            yellow: 25
+            green: 60
       - type: markdown
         content: >-
           {% set seconds = states('sensor.ups_time_remaining') | float(none) %}

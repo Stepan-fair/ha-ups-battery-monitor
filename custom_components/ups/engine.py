@@ -61,6 +61,7 @@ def advance(state: EngineState,reading: ValidatedSample) -> Update:
     post_cutoff=None if s.post_cutoff_charge_ah is None else max(0,s.post_cutoff_charge_ah+iv.delta_stored_ah)
     s=replace(s,post_cutoff_charge_ah=post_cutoff,usable_empty=post_cutoff<=0 if post_cutoff is not None else s.usable_empty)
     q=None if s.remaining_charge_ah is None else s.remaining_charge_ah+iv.delta_stored_ah
+    if s.post_cutoff_charge_ah is not None and q is not None:q=max(0,q)
     smooth=s.smoothed_discharge_a
     if sample.current_a< -c.mode_exit_a:
         current=-sample.current_a
@@ -119,8 +120,12 @@ def advance(state: EngineState,reading: ValidatedSample) -> Update:
     below=c.cutoff_v is not None and sample.current_a<0 and sample.voltage_v<=c.cutoff_v
     count=state.cutoff_count+1 if below and continuous else (1 if below else 0)
     s=replace(s,cutoff_count=count)
-    if (sample.cutoff_flag is True or count>=2) and not state.usable_empty:
-        if s.last_anchor and s.last_anchor.independently_verified:
+    if (sample.cutoff_flag is True or count>=2) and (not state.usable_empty or s.remaining_charge_ah is None):
+        if s.remaining_charge_ah is None:
+            # The first independent empty boundary is sufficient to start a
+            # usable-range inventory; capacity remains a nominal estimate.
+            s=set_known_soc(s,Anchor(sample.utc,0,"confirmed_cutoff",True)).state
+        elif s.last_anchor and s.last_anchor.independently_verified:
             previous_capacity=s.working_capacity
             chemical_q=s.remaining_charge_ah
             previous_gap=s.has_gap

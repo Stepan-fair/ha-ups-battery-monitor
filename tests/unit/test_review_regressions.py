@@ -85,3 +85,17 @@ def test_backwards_utc_restart_never_learns_across_unknown_interval(explicit_res
     assert s.has_gap
     assert s.last_observation.has_gap
     assert s.working_capacity is None
+
+
+def test_first_confirmed_cutoff_establishes_usable_zero_without_manual_soc():
+    s=initial_state(profile())
+    for t in range(0,26,5):s=advance(s,reading(t,-.5,10.4)).state
+    f=forecast(s,s.last_sample,now=utc(25))
+    assert f.usable_soc_percent==0
+    assert f.remaining_ah==0
+    assert f.time_remaining_s==0
+    s=advance(s,reading(30,.5,12)).state
+    s=advance(s,reading(35,.5,12)).state
+    f=forecast(s,s.last_sample,now=utc(35))
+    assert 0<f.remaining_ah<=s.post_cutoff_charge_ah
+    assert s.working_capacity is None
