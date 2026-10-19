@@ -1,0 +1,132 @@
+path: ibp
+sections:
+  - type: grid
+    cards:
+      - type: heading
+        heading: ИБП · запас автономности
+        icon: mdi:battery-heart
+      - type: gauge
+        entity: sensor.ups_soc
+        name: Расчётный заряд АКБ
+        min: 0
+        max: 100
+        severity:
+          red: 0
+          yellow: 25
+          green: 60
+      - type: markdown
+        content: >-
+          {% set seconds = states('sensor.ups_time_remaining') | float(none) %}
+          ## {% if seconds is none %}Время пока неизвестно{% else %}{{ '%02d:%02d' | format((seconds // 3600) | int, ((seconds % 3600) // 60) | int) }}{% endif %}
+
+          {% set context = state_attr('sensor.ups_time_remaining', 'context') or '' %}
+          {% if context.startswith('discharging') %}Работа от АКБ{% elif context.startswith('complete_load') %}Если сеть пропадёт сейчас · по полной нагрузке{% elif context.startswith('last_discharge_load') %}Если сеть пропадёт сейчас · по последнему разряду{% else %}Для прогноза нужна подтверждённая полная нагрузка{% endif %}
+          {% if 'to_reserve' in context %} · до рабочего резерва{% endif %}
+
+          {% set end = states('sensor.ups_expected_empty_at') %}
+          {% if end not in ['unknown','unavailable','none'] %}Ожидаемое окончание: **{{ as_local(as_datetime(end)).strftime('%d.%m.%Y %H:%M') }}**{% endif %}
+      - type: entities
+        title: Заряд и доступный запас
+        show_header_toggle: false
+        entities:
+          - sensor.ups_battery_mode
+          - binary_sensor.ups_on_battery
+          - sensor.ups_usable_soc
+          - sensor.ups_remaining_ah
+          - sensor.ups_remaining_wh
+          - sensor.ups_time_to_full
+      - type: markdown
+        content: >-
+          **{{ {'restore_error':'Ошибка восстановления','storage_error':'Ошибка сохранения','limited_meter':'Ограничено измерителем','unavailable':'Данные недоступны','no_initial_anchor':'Нет начальной точки','capacity_conflict':'Расхождение оценок ёмкости','data_gap':'Есть пропуск данных','nominal':'Предварительно по номиналу','manual_estimate':'Предварительно по ручной точке','observed':'Подтверждено наблюдениями'}.get(states('sensor.ups_data_quality'),'Ожидание показаний') }}**
+
+          {% set issues = state_attr('sensor.ups_data_quality','issues') or [] %}
+          {% if 'range' in issues %}Ток приблизился к пределу измерителя. Этот участок не обучает ёмкость.{% endif %}
+          {% if 'no_initial_anchor' in issues %}Укажите известный заряд в настройках или дождитесь подтверждённого полного заряда. 100% автоматически при запуске не задаётся.{% endif %}
+          {% if 'temperature_uncompensated' in issues %}Температура отличается от условий определения ёмкости. Поправка не подтверждена.{% endif %}
+          {% if 'preliminary' in issues %}Прогноз нового режима предварительный.{% endif %}
+          {% if 'model_mismatch' in issues %}Баланс заряда вышел за границы модели. Требуется проверка начальной точки и измерителя.{% endif %}
+
+          {% set last = states('sensor.ups_last_sample_at') %}
+          Последнее исправное измерение: {% if last not in ['unknown','unavailable','none'] %}{{ as_local(as_datetime(last)).strftime('%d.%m.%Y %H:%M:%S') }}{% else %}ещё нет{% endif %}
+  - type: grid
+    cards:
+      - type: heading
+        heading: Ёмкость и условия
+        icon: mdi:battery-check
+      - type: entities
+        show_header_toggle: false
+        entities:
+          - sensor.ups_capacity_ah
+          - sensor.ups_health
+          - sensor.ups_voltage
+          - sensor.ups_current
+          - sensor.ups_temperature
+          - sensor.ups_humidity
+          - sensor.ups_bms_soc
+      - type: markdown
+        content: >-
+          Батарея: **{{ state_attr('sensor.ups_capacity_ah','battery_name') or 'АКБ' }}**.
+          {% if state_attr('sensor.ups_capacity_ah','origin') == 'nominal' %}Ёмкость предварительная, по заявленному номиналу.{% else %}Рабочая ёмкость определена по наблюдениям; условия — в подробностях сенсора.{% endif %}
+
+          Здоровье показывает сохранение ёмкости только при сопоставимых условиях.
+          {% if state_attr('sensor.ups_temperature','ambient') %}Используется температура помещения.{% endif %}
+          Влажность показана как условие эксплуатации и не меняет расчёт ёмкости.
+      - type: button
+        name: Настройки АКБ и ИБП
+        icon: mdi:cog-outline
+        tap_action:
+          action: navigate
+          navigation_path: /config/integrations/integration/ups
+  - type: grid
+    cards:
+      - type: heading
+        heading: Сессии и накопленные потоки
+        icon: mdi:history
+      - type: entities
+        title: Текущие и последние сессии
+        show_header_toggle: false
+        entities:
+          - sensor.ups_charge_started_at
+          - sensor.ups_charge_duration
+          - sensor.ups_last_charge_ended_at
+          - sensor.ups_last_charge_duration
+          - sensor.ups_discharge_started_at
+          - sensor.ups_discharge_duration
+          - sensor.ups_last_discharge_ended_at
+          - sensor.ups_last_discharge_duration
+      - type: entities
+        title: За всё время · не сбрасывается при замене АКБ
+        show_header_toggle: false
+        entities:
+          - sensor.ups_charge_ah_total
+          - sensor.ups_discharge_ah_total
+          - sensor.ups_charge_wh_total
+          - sensor.ups_discharge_wh_total
+      - type: logbook
+        title: Заряды, разряды и восстановление
+        hours_to_show: 168
+        entities:
+          - sensor.ups_battery_mode
+  - type: grid
+    cards:
+      - type: heading
+        heading: Графики АКБ
+        icon: mdi:chart-line
+      - type: history-graph
+        title: Заряд и доступный запас
+        hours_to_show: 24
+        entities:
+          - sensor.ups_soc
+          - sensor.ups_usable_soc
+      - type: history-graph
+        title: Ток и напряжение · выбранный источник
+        hours_to_show: 24
+        entities:
+          - sensor.ups_current
+          - sensor.ups_voltage
+      - type: history-graph
+        title: Температура и влажность
+        hours_to_show: 24
+        entities:
+          - sensor.ups_temperature
+          - sensor.ups_humidity

@@ -1,0 +1,14 @@
+{
+  "domain": "ups",
+  "name": "UPS Battery Monitor",
+  "version": "0.1.0",
+  "config_flow": true,
+  "documentation": "https://github.com/Stepan-fair/ha-ups-battery-monitor",
+  "codeowners": [
+    "@Stepan-fair"
+  ],
+  "iot_class": "calculated",
+  "integration_type": "helper",
+  "requirements": [],
+  "issue_tracker": "https://github.com/Stepan-fair/ha-ups-battery-monitor/issues"
+}
